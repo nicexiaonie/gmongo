@@ -4,11 +4,20 @@ import (
 	"fmt"
 	"time"
 
+	mongotrace "github.com/nicexiaonie/gmongo/tracing/trace"
+	"go.mongodb.org/mongo-driver/event"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
+
+// MonitorProvider MongoDB 监控器提供者
+type MonitorProvider interface {
+	CommandMonitor() *event.CommandMonitor
+	PoolMonitor() *event.PoolMonitor
+	ServerMonitor() *event.ServerMonitor
+}
 
 // Config MongoDB 配置
 type Config struct {
@@ -31,29 +40,37 @@ type Config struct {
 	ServerSelectionTLS bool   `json:"server_selection_tls" yaml:"server_selection_tls"` // TLS 服务器选择
 
 	// 连接池配置
-	MaxPoolSize     uint64        `json:"max_pool_size" yaml:"max_pool_size"`         // 最大连接数
-	MinPoolSize     uint64        `json:"min_pool_size" yaml:"min_pool_size"`         // 最小连接数
+	MaxPoolSize     uint64        `json:"max_pool_size" yaml:"max_pool_size"`           // 最大连接数
+	MinPoolSize     uint64        `json:"min_pool_size" yaml:"min_pool_size"`           // 最小连接数
 	MaxConnIdleTime time.Duration `json:"max_conn_idle_time" yaml:"max_conn_idle_time"` // 连接最大空闲时间
-	MaxConnecting   uint64        `json:"max_connecting" yaml:"max_connecting"`       // 最大连接中数量
+	MaxConnecting   uint64        `json:"max_connecting" yaml:"max_connecting"`         // 最大连接中数量
 
 	// 超时配置
-	ConnectTimeout    time.Duration `json:"connect_timeout" yaml:"connect_timeout"`       // 连接超时
-	SocketTimeout     time.Duration `json:"socket_timeout" yaml:"socket_timeout"`         // Socket 超时
+	ConnectTimeout      time.Duration `json:"connect_timeout" yaml:"connect_timeout"`             // 连接超时
+	SocketTimeout       time.Duration `json:"socket_timeout" yaml:"socket_timeout"`               // Socket 超时
 	ServerSelectTimeout time.Duration `json:"server_select_timeout" yaml:"server_select_timeout"` // 服务器选择超时
-	HeartbeatInterval time.Duration `json:"heartbeat_interval" yaml:"heartbeat_interval"` // 心跳间隔
+	HeartbeatInterval   time.Duration `json:"heartbeat_interval" yaml:"heartbeat_interval"`       // 心跳间隔
 
 	// 读写配置
-	ReadPreference  string `json:"read_preference" yaml:"read_preference"`   // 读偏好：primary, primaryPreferred, secondary, secondaryPreferred, nearest
-	ReadConcern     string `json:"read_concern" yaml:"read_concern"`         // 读关注：local, available, majority, linearizable, snapshot
-	WriteConcern    string `json:"write_concern" yaml:"write_concern"`       // 写关注：majority, w1, w2, w3
-	WTimeout        int    `json:"w_timeout" yaml:"w_timeout"`               // 写超时（毫秒）
-	Journal         *bool  `json:"journal" yaml:"journal"`                   // 是否写入日志
+	ReadPreference string `json:"read_preference" yaml:"read_preference"` // 读偏好：primary, primaryPreferred, secondary, secondaryPreferred, nearest
+	ReadConcern    string `json:"read_concern" yaml:"read_concern"`       // 读关注：local, available, majority, linearizable, snapshot
+	WriteConcern   string `json:"write_concern" yaml:"write_concern"`     // 写关注：majority, w1, w2, w3
+	WTimeout       int    `json:"w_timeout" yaml:"w_timeout"`             // 写超时（毫秒）
+	Journal        *bool  `json:"journal" yaml:"journal"`                 // 是否写入日志
 
 	// 压缩配置
 	Compressors []string `json:"compressors" yaml:"compressors"` // 压缩器：snappy, zlib, zstd
 
 	// 应用配置
 	AppName string `json:"app_name" yaml:"app_name"` // 应用名称
+
+	// 监控配置
+	Tracing           MonitorProvider              `json:"-" yaml:"-"` // Trace 监控器提供者
+	Monitor           *event.CommandMonitor        `json:"-" yaml:"-"` // 命令监控器
+	CommandMonitor    *event.CommandMonitor        `json:"-" yaml:"-"` // 命令监控器
+	PoolMonitor       *event.PoolMonitor           `json:"-" yaml:"-"` // 连接池监控器
+	ServerMonitor     *event.ServerMonitor         `json:"-" yaml:"-"` // 服务发现和心跳监控器
+	ClientOptionsHook func(*options.ClientOptions) `json:"-" yaml:"-"` // 客户端选项自定义钩子
 
 	// TLS 配置
 	TLS                bool   `json:"tls" yaml:"tls"`                                   // 启用 TLS
@@ -62,8 +79,8 @@ type Config struct {
 	TLSCAFile          string `json:"tls_ca_file" yaml:"tls_ca_file"`                   // CA 文件路径
 
 	// 其他配置
-	ZlibLevel       int  `json:"zlib_level" yaml:"zlib_level"`             // Zlib 压缩级别
-	ZstdLevel       int  `json:"zstd_level" yaml:"zstd_level"`             // Zstd 压缩级别
+	ZlibLevel        int  `json:"zlib_level" yaml:"zlib_level"`                 // Zlib 压缩级别
+	ZstdLevel        int  `json:"zstd_level" yaml:"zstd_level"`                 // Zstd 压缩级别
 	DisableOCSPCheck bool `json:"disable_ocsp_check" yaml:"disable_ocsp_check"` // 禁用 OCSP 检查
 }
 
@@ -260,6 +277,33 @@ func (c *Config) ToClientOptions() *options.ClientOptions {
 	// 其他配置
 	if c.DisableOCSPCheck {
 		opts.SetDisableOCSPEndpointCheck(true)
+	}
+
+	// 监控配置
+	var traceCommandMonitor *event.CommandMonitor
+	var tracePoolMonitor *event.PoolMonitor
+	var traceServerMonitor *event.ServerMonitor
+	if c.Tracing != nil {
+		traceCommandMonitor = c.Tracing.CommandMonitor()
+		tracePoolMonitor = c.Tracing.PoolMonitor()
+		traceServerMonitor = c.Tracing.ServerMonitor()
+	}
+
+	commandMonitor := c.CommandMonitor
+	if commandMonitor == nil {
+		commandMonitor = c.Monitor
+	}
+	if monitor := mongotrace.ComposeCommandMonitors(traceCommandMonitor, commandMonitor); monitor != nil {
+		opts.SetMonitor(monitor)
+	}
+	if monitor := mongotrace.ComposePoolMonitors(tracePoolMonitor, c.PoolMonitor); monitor != nil {
+		opts.SetPoolMonitor(monitor)
+	}
+	if monitor := mongotrace.ComposeServerMonitors(traceServerMonitor, c.ServerMonitor); monitor != nil {
+		opts.SetServerMonitor(monitor)
+	}
+	if c.ClientOptionsHook != nil {
+		c.ClientOptionsHook(opts)
 	}
 
 	return opts

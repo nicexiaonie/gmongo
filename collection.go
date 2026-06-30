@@ -37,6 +37,21 @@ func (c *Collection) Query() *QueryBuilder {
 	}
 }
 
+// QueryWithContext 使用上下文创建查询构建器
+func (c *Collection) QueryWithContext(ctx context.Context) *QueryBuilder {
+	return c.Query().Context(ctx)
+}
+
+// NewAggregation 创建聚合构建器
+func (c *Collection) NewAggregation() *AggregationBuilder {
+	return NewAggregation(c)
+}
+
+// NewAggregationWithContext 使用上下文创建聚合构建器
+func (c *Collection) NewAggregationWithContext(ctx context.Context) *AggregationBuilder {
+	return NewAggregationWithContext(ctx, c)
+}
+
 // InsertOne 插入单个文档
 func (c *Collection) InsertOne(ctx context.Context, document interface{}, opts ...*options.InsertOneOptions) (*mongo.InsertOneResult, error) {
 	if ctx == nil {

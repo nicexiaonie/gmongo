@@ -27,6 +27,11 @@ func NewAggregation(collection *Collection) *AggregationBuilder {
 	}
 }
 
+// NewAggregationWithContext 使用上下文创建聚合构建器
+func NewAggregationWithContext(ctx context.Context, collection *Collection) *AggregationBuilder {
+	return NewAggregation(collection).Context(ctx)
+}
+
 // Context 设置上下文
 func (ab *AggregationBuilder) Context(ctx context.Context) *AggregationBuilder {
 	ab.ctx = ctx
