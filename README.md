@@ -640,12 +640,12 @@ usersWithHooks.RegisterAfter(gmongo.OpUpdate, func(ctx context.Context, operatio
 
 ## OpenTelemetry Trace
 
-GMongo 内置 MongoDB command tracing instrumentation。使用者只需要初始化 OpenTelemetry `TracerProvider`，再将 `mongotrace.New(...)` 配置到 `gmongo.Config.Tracing`。
+GMongo 通过 `contrib/otel` 子包提供 MongoDB command tracing instrumentation。使用者只需要初始化 OpenTelemetry `TracerProvider`，再将 `mongootel.New(...)` 配置到 `gmongo.Config.Tracing`。
 
 ### 工作机制
 
 1. GMongo 在创建 MongoDB client 时将 tracing instrumentation 注入 `mongo/options.ClientOptions`。
-2. MongoDB Driver 发出 command started 事件时，`tracing/trace` 基于当前操作的 `context.Context` 创建 client span。
+2. MongoDB Driver 发出 command started 事件时，`contrib/otel` 基于当前操作的 `context.Context` 创建 client span。
 3. MongoDB Driver 发出 command succeeded 事件时，instrumentation 标记 span 成功并结束 span。
 4. MongoDB Driver 发出 command failed 事件时，instrumentation 记录错误、标记 span 失败并结束 span。
 5. started / succeeded / failed 事件通过 `RequestID + ConnectionID` 关联。
@@ -660,7 +660,7 @@ import (
     "log"
 
     "github.com/nicexiaonie/gmongo"
-    mongotrace "github.com/nicexiaonie/gmongo/tracing/trace"
+    mongootel "github.com/nicexiaonie/gmongo/contrib/otel"
     "go.opentelemetry.io/otel"
     sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
@@ -672,7 +672,7 @@ func main() {
 
     config := gmongo.DefaultConfig()
     config.Database = "myapp"
-    config.Tracing = mongotrace.New(mongotrace.Config{
+    config.Tracing = mongootel.New(mongootel.Config{
         Enabled:        true,
         TracerProvider: tracerProvider,
         TracerName:     "myapp/mongodb",
@@ -688,7 +688,7 @@ func main() {
 如果项目已经在应用入口统一设置过全局 OpenTelemetry provider，也可以省略 `TracerProvider`，默认使用 `otel.GetTracerProvider()`。
 
 ```go
-config.Tracing = mongotrace.New(mongotrace.DefaultConfig())
+config.Tracing = mongootel.New(mongootel.DefaultConfig())
 ```
 
 ### 使用业务 context 关联 command span
@@ -747,10 +747,10 @@ MongoDB aggregate orders
 自定义 span name：
 
 ```go
-config.Tracing = mongotrace.New(mongotrace.Config{
+config.Tracing = mongootel.New(mongootel.Config{
     Enabled:        true,
     TracerProvider: tracerProvider,
-    SpanNameFormatter: func(info mongotrace.CommandStartedInfo) string {
+    SpanNameFormatter: func(info mongootel.CommandStartedInfo) string {
         return "mongo." + info.CommandName
     },
 })
@@ -773,10 +773,10 @@ config.Tracing = mongotrace.New(mongotrace.Config{
 追加自定义属性：
 
 ```go
-config.Tracing = mongotrace.New(mongotrace.Config{
+config.Tracing = mongootel.New(mongootel.Config{
     Enabled:        true,
     TracerProvider: tracerProvider,
-    Attributes: func(info mongotrace.CommandStartedInfo) []attribute.KeyValue {
+    Attributes: func(info mongootel.CommandStartedInfo) []attribute.KeyValue {
         return []attribute.KeyValue{
             attribute.String("app.mongo.collection", info.Collection),
         }
@@ -791,11 +791,11 @@ config.Tracing = mongotrace.New(mongotrace.Config{
 如确实需要记录部分 command 信息，应只记录白名单字段：
 
 ```go
-config.Tracing = mongotrace.New(mongotrace.Config{
+config.Tracing = mongootel.New(mongootel.Config{
     Enabled:        true,
     TracerProvider: tracerProvider,
     RecordCommand:  true,
-    CommandSanitizer: func(info mongotrace.CommandStartedInfo) []attribute.KeyValue {
+    CommandSanitizer: func(info mongootel.CommandStartedInfo) []attribute.KeyValue {
         return []attribute.KeyValue{
             attribute.String("mongo.command", info.CommandName),
             attribute.String("mongo.collection", info.Collection),
@@ -809,17 +809,18 @@ config.Tracing = mongotrace.New(mongotrace.Config{
 MongoDB Driver 的 PoolMonitor 和 ServerMonitor 不携带业务 `context.Context`，因此默认不创建请求子 span。它们适合用于 metrics、日志和诊断。
 
 ```go
-config.Tracing = mongotrace.New(mongotrace.Config{
+config.Tracing = mongootel.New(mongootel.Config{
     Enabled:        true,
     TracerProvider: tracerProvider,
-    PoolEventHandler: func(info mongotrace.PoolEventInfo) {
+    PoolEventHandler: func(info mongootel.PoolEventInfo) {
         log.Printf("mongo pool event: type=%s address=%s reason=%s", info.Type, info.Address, info.Reason)
     },
-    ServerEventHandler: func(info mongotrace.ServerEventInfo) {
+    ServerEventHandler: func(info mongootel.ServerEventInfo) {
         log.Printf("mongo server event: type=%s connectionID=%s", info.Type, info.ConnectionID)
     },
 })
 ```
+
 
 ## 低层 Monitor 接入
 
@@ -846,7 +847,7 @@ config.ClientOptionsHook = func(opts *options.ClientOptions) {
 保留低层 callback adapter：
 
 ```go
-config.CommandMonitor = mongotrace.NewCommandMonitor(mongotrace.CommandMonitorOptions{
+config.CommandMonitor = mongootel.NewCommandMonitor(mongootel.CommandMonitorOptions{
     Started: func(ctx context.Context, e *event.CommandStartedEvent) {},
     Succeeded: func(ctx context.Context, e *event.CommandSucceededEvent) {},
     Failed: func(ctx context.Context, e *event.CommandFailedEvent) {},

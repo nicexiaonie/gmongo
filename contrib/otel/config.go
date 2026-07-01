@@ -1,4 +1,4 @@
-package trace
+package otel
 
 import (
 	"go.opentelemetry.io/otel/attribute"
@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	defaultTracerName = "github.com/nicexiaonie/gmongo/tracing/trace"
+	defaultTracerName = "github.com/nicexiaonie/gmongo/contrib/otel"
 	defaultDBSystem   = "mongodb"
 )
 

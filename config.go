@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	mongotrace "github.com/nicexiaonie/gmongo/tracing/trace"
 	"go.mongodb.org/mongo-driver/event"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
@@ -293,13 +292,13 @@ func (c *Config) ToClientOptions() *options.ClientOptions {
 	if commandMonitor == nil {
 		commandMonitor = c.Monitor
 	}
-	if monitor := mongotrace.ComposeCommandMonitors(traceCommandMonitor, commandMonitor); monitor != nil {
+	if monitor := composeCommandMonitors(traceCommandMonitor, commandMonitor); monitor != nil {
 		opts.SetMonitor(monitor)
 	}
-	if monitor := mongotrace.ComposePoolMonitors(tracePoolMonitor, c.PoolMonitor); monitor != nil {
+	if monitor := composePoolMonitors(tracePoolMonitor, c.PoolMonitor); monitor != nil {
 		opts.SetPoolMonitor(monitor)
 	}
-	if monitor := mongotrace.ComposeServerMonitors(traceServerMonitor, c.ServerMonitor); monitor != nil {
+	if monitor := composeServerMonitors(traceServerMonitor, c.ServerMonitor); monitor != nil {
 		opts.SetServerMonitor(monitor)
 	}
 	if c.ClientOptionsHook != nil {

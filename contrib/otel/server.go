@@ -1,4 +1,4 @@
-package trace
+package otel
 
 import "go.mongodb.org/mongo-driver/event"
 
